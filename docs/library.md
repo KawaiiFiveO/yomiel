@@ -145,7 +145,7 @@ var session = new ZSession(machine, new ZScreen(80, 25), new ZSessionOptions { S
 | `EndText`, `ErrorText` | | Shown when the story quits or fails. `{0}` in `ErrorText` is the error. |
 | `Sound`, `Warning`, `Error` | | Callbacks: beeps, warnings for a log, the story failing. |
 
-`ZStoryFolder(folder)` is the `IZStorage` in a folder: `name.qzl` saves, `data\` for auxiliary data, `transcript.txt`, `commands.txt`, `suspended.qzl` and `suspended.screen`. `ZStoryFolder.SafeName` makes a name safe for a file.
+`ZStoryFolder(folder)` is the `IZStorage` in a folder: `name.qzl` saves, `data/` for auxiliary data, `transcript.txt`, `commands.txt`, `suspended.qzl` and `suspended.screen`. `ZStoryFolder.SafeName` makes a name safe for a file.
 
 `ZPacer` methods, called in this order each `Update`: `BeforeReveal`, `MayReveal` for each item, `AfterReveal`, then `HoldInput`. `HoldMore` keeps `[MORE]` showing; `DiskOperation` runs a save or restore's completion, now or later. The base class does nothing.
 

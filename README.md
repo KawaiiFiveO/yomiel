@@ -41,7 +41,7 @@ Versions 1–4, 6, and Blorb files (`.zblorb`) are not supported.
 
 Leaving a story keeps its place: Ctrl+Q, Ctrl+C or closing the window. It continues next time. `save` and `restore` in a story keep extra saves by name.
 
-Saves are kept in `%APPDATA%\Yomiel` on Windows and `~/.local/share/yomiel` on Linux (`~/Library/Application Support/Yomiel` on macOS).
+Saves are kept in `%APPDATA%/Yomiel` on Windows and `~/.local/share/yomiel` on Linux (`~/Library/Application Support/Yomiel` on macOS).
 
 ## Options
 
