@@ -9,7 +9,7 @@
     <RollForward>Major</RollForward>
     <ApplicationIcon>yomiel.ico</ApplicationIcon>
     <!-- Releases set it from the tag: -p:Version=1.0.0 -->
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
   <!-- Release builds (dotnet publish -r <rid>): one self-contained, trimmed, compressed file. -->

@@ -60,7 +60,7 @@ yomiel-tui [story | folder] [--new] [--data DIR] [--colors 24|16] [--seed N] [--
 
 ## For developers
 
-Yomiel is also a .NET Standard 2.0 library with no dependencies, for putting a Z-machine in other programs. See `docs/library.md` for the API and `docs/development.md` for building and testing.
+Yomiel is also a .NET Standard 2.0 library with no dependencies, for putting a Z-machine in other programs. See [docs/library.md](docs/library.md) for the API and [docs/development.md](docs/development.md) for building and testing.
 
 ## License
 
