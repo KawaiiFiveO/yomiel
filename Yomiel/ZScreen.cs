@@ -29,10 +29,15 @@ public readonly struct ZCell
 /// </summary>
 public sealed class ZScreen
 {
+    // How a lower-window line ended: a line break, wrapping at a space (which was dropped), or
+    // wrapping inside a word. Wrapped lines are joined again when the screen is resized.
+    private enum LineBreak : byte { Hard, Space, Cut }
+
     private sealed class Line
     {
         public readonly List<ZCell> Cells = new();
         public ZColor Fill;
+        public LineBreak Break;
     }
 
     private readonly List<Line> lines = new();
@@ -41,8 +46,9 @@ public sealed class ZScreen
     private ZCell[] upper;
     private int upperRow;
     private int upperColumn;
-    private readonly ZCell[] frame;
-    private readonly int scrollbackLimit;
+    private ZCell[] frame;
+    private readonly int scrollbackLines;
+    private int scrollbackLimit;
     private ZColor lowerFill;
 
     public ZScreen(int columns, int rows, int scrollbackLines = 1000)
@@ -51,13 +57,14 @@ public sealed class ZScreen
             throw new ArgumentOutOfRangeException(nameof(columns));
         Columns = columns;
         Rows = rows;
+        this.scrollbackLines = scrollbackLines;
         scrollbackLimit = Math.Max(rows, scrollbackLines);
         frame = new ZCell[columns * rows];
         Reset();
     }
 
-    public int Columns { get; }
-    public int Rows { get; }
+    public int Columns { get; private set; }
+    public int Rows { get; private set; }
     public int UpperHeight { get; private set; }
     /// <summary>The window <see cref="Write(char)"/> writes to: 0 lower, 1 upper.</summary>
     public int Window { get; set; }
@@ -204,30 +211,40 @@ public sealed class ZScreen
 
         if (c == '\n')
         {
-            NewLine();
+            NewLine(LineBreak.Hard);
             return;
         }
-        if (current.Cells.Count >= Columns)
-        {
-            if (c == ' ')
-            {
-                NewLine();
-                return;
-            }
-            int space = BufferMode ? current.Cells.FindLastIndex(x => x.Char == ' ') : -1;
-            if (space > 0)
-            {
-                List<ZCell> word = current.Cells.GetRange(space + 1, current.Cells.Count - space - 1);
-                current.Cells.RemoveRange(space, current.Cells.Count - space);
-                NewLine();
-                current.Cells.AddRange(word);
-            }
-            else
-            {
-                NewLine();
-            }
-        }
+        if (current.Cells.Count >= Columns && Wrap(c == ' ', BufferMode, NewLine))
+            return;
         current.Cells.Add(Cell(c));
+    }
+
+    /// <summary>
+    /// Ends the current line, which is full, before a character is added: at the character if
+    /// it's a space (returns true: the space is dropped), else at the line's last space, moving
+    /// the word after it to the next line, or else inside the word.
+    /// </summary>
+    private bool Wrap(bool atSpace, bool words, Action<LineBreak> newLine)
+    {
+        if (atSpace)
+        {
+            newLine(LineBreak.Space);
+            return true;
+        }
+        Line full = current;
+        int space = words ? full.Cells.FindLastIndex(x => x.Char == ' ') : -1;
+        if (space > 0)
+        {
+            List<ZCell> word = full.Cells.GetRange(space + 1, full.Cells.Count - space - 1);
+            full.Cells.RemoveRange(space, full.Cells.Count - space);
+            newLine(LineBreak.Space);
+            current.Cells.AddRange(word);
+        }
+        else
+        {
+            newLine(LineBreak.Cut);
+        }
+        return false;
     }
 
     /// <summary>
@@ -250,17 +267,110 @@ public sealed class ZScreen
 
     private static ZCell Blank(ZColor background) => new(' ', ZColor.Default, background, ZTextStyle.Roman);
 
-    private void NewLine()
+    private void NewLine(LineBreak ending)
     {
+        current.Break = ending;
         lines.Add(current);
         current = new Line { Fill = Background };
         LowerLineCount++;
+        TrimScrollback();
+    }
+
+    private void TrimScrollback()
+    {
         if (lines.Count > scrollbackLimit)
         {
             int drop = lines.Count - scrollbackLimit;
             lines.RemoveRange(0, drop);
             clearMark = Math.Max(0, clearMark - drop);
         }
+    }
+
+    // ---- Resizing ----
+
+    /// <summary>
+    /// Changes the screen size. The upper window keeps its top left corner. The lower window,
+    /// scrollback included, wraps again at the new width. Everything written is shown afterwards
+    /// (see <see cref="ShownLines"/>), and <see cref="LowerLineCount"/> counts the new lines.
+    /// </summary>
+    public void Resize(int columns, int rows)
+    {
+        if (columns < 1 || rows < 1)
+            throw new ArgumentOutOfRangeException(nameof(columns));
+        if (columns == Columns && rows == Rows)
+            return;
+
+        var newUpper = new ZCell[columns * rows];
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < columns; c++)
+                newUpper[r * columns + c] = r < Rows && c < Columns ? upper[r * Columns + c] : Blank(ZColor.Default);
+        upper = newUpper;
+        UpperHeight = Math.Min(UpperHeight, rows);
+        bool rewrap = columns != Columns;
+        Columns = columns;
+        Rows = rows;
+        frame = new ZCell[columns * rows];
+        scrollbackLimit = Math.Max(rows, scrollbackLines);
+        if (rewrap)
+            Rewrap();
+        TrimScrollback();
+        if (ShownLines != long.MaxValue)
+        {
+            ShownLines = LowerLineCount + 1;
+            ShownColumns = 0;
+        }
+    }
+
+    /// <summary>Joins wrapped lines and wraps them at the current width.</summary>
+    private void Rewrap()
+    {
+        long gone = LowerLineCount - lines.Count;
+        var old = new List<Line>(lines) { current };
+        var laid = new List<Line>();
+        int newClearMark = 0;
+        var cells = new List<ZCell>();
+        ZColor fill = ZColor.Default;
+        void Next(LineBreak ending)
+        {
+            current.Break = ending;
+            laid.Add(current);
+            current = new Line { Fill = fill };
+        }
+
+        for (int i = 0; i < old.Count; i++)
+        {
+            if (i == clearMark)
+                newClearMark = laid.Count;
+            Line line = old[i];
+            cells.AddRange(line.Cells);
+            bool last = i == old.Count - 1;
+            if (line.Break != LineBreak.Hard && !last)
+            {
+                if (line.Break == LineBreak.Space)
+                {
+                    ZCell before = line.Cells.Count > 0 ? line.Cells[line.Cells.Count - 1] : Blank(line.Fill);
+                    cells.Add(new ZCell(' ', before.Foreground, before.Background, before.Style));
+                }
+                continue;
+            }
+
+            // Lay the joined line out as Write does, with word wrapping.
+            fill = line.Fill;
+            current = new Line { Fill = fill };
+            foreach (ZCell cell in cells)
+            {
+                if (current.Cells.Count >= Columns && Wrap(cell.Char == ' ', true, Next))
+                    continue;
+                current.Cells.Add(cell);
+            }
+            cells.Clear();
+            if (!last)
+                Next(LineBreak.Hard);
+        }
+        lines.Clear();
+        lines.AddRange(laid);
+        clearMark = Math.Min(newClearMark, lines.Count);
+        LowerLineCount = gone + lines.Count;
     }
 
     private void Erase(int window)
@@ -410,7 +520,8 @@ public sealed class ZScreen
 
     // ---- Saving the contents, for suspended stories ----
 
-    private const int FormatVersion = 1;
+    // 1: without line breaks (loaded as all line breaks). 2: each line's break after its fill.
+    private const int FormatVersion = 2;
 
     /// <summary>The upper window and the last <paramref name="maxLines"/> lines of the lower window, with styles and colours.</summary>
     public byte[] SaveContents(int maxLines = 200)
@@ -437,11 +548,27 @@ public sealed class ZScreen
         foreach (Line line in kept)
         {
             WriteColor(w, line.Fill);
+            w.Write((byte)line.Break);
             w.Write(line.Cells.Count);
             foreach (ZCell cell in line.Cells)
                 WriteCell(w, cell);
         }
         return stream.ToArray();
+    }
+
+    /// <summary>
+    /// A screen of the size the contents were saved at, holding them, or null if they can't be
+    /// read. <see cref="Resize"/> it to the size in use.
+    /// </summary>
+    public static ZScreen FromContents(byte[] data, int scrollbackLines = 1000)
+    {
+        if (data == null || data.Length < 12)
+            return null;
+        int version = BitConverter.ToInt32(data, 0), columns = BitConverter.ToInt32(data, 4), rows = BitConverter.ToInt32(data, 8);
+        if (version < 1 || version > FormatVersion || columns < 1 || rows < 1 || (long)columns * rows > data.Length)
+            return null;
+        var screen = new ZScreen(columns, rows, scrollbackLines);
+        return screen.LoadContents(data) ? screen : null;
     }
 
     /// <summary>Loads contents saved by <see cref="SaveContents"/>. Returns false, leaving the screen empty, if they don't fit this screen.</summary>
@@ -451,7 +578,8 @@ public sealed class ZScreen
         try
         {
             var r = new BinaryReader(new MemoryStream(data));
-            if (r.ReadInt32() != FormatVersion || r.ReadInt32() != Columns || r.ReadInt32() != Rows)
+            int version = r.ReadInt32();
+            if (version < 1 || version > FormatVersion || r.ReadInt32() != Columns || r.ReadInt32() != Rows)
                 return false;
             UpperHeight = r.ReadInt32();
             Window = r.ReadInt32();
@@ -469,6 +597,8 @@ public sealed class ZScreen
             for (int n = 0; n < count; n++)
             {
                 var line = new Line { Fill = ReadColor(r) };
+                if (version >= 2)
+                    line.Break = (LineBreak)Math.Min(r.ReadByte(), (byte)LineBreak.Cut);
                 int cells = r.ReadInt32();
                 for (int i = 0; i < cells; i++)
                     line.Cells.Add(ReadCell(r));

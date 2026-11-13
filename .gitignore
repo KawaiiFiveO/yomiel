@@ -1,2 +1,7 @@
-# Story files are not redistributed. Put test stories here or set YOMIEL_STORIES.
-stories/
+# Story files are not redistributed, except the ones in Yomiel.Tests/stories. Put other test stories here or set YOMIEL_STORIES.
+/stories/
+bin/
+obj/
+publish/
+.vs/
+*.user

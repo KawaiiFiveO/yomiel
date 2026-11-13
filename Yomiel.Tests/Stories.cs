@@ -7,29 +7,29 @@ using Xunit;
 namespace Yomiel.Tests;
 
 /// <summary>
-/// Finds story files in the folder named by YOMIEL_STORIES, or the nearest "stories" folder above
-/// the test binaries. Tests skip when their story is missing.
+/// Finds story files in the folder named by YOMIEL_STORIES, then in each "stories" folder above the
+/// test binaries, nearest first: Yomiel.Tests/stories (the redistributable ones, tracked), then the
+/// repository's own gitignored stories folder. Tests skip when their story is missing.
 /// </summary>
 internal static class Stories
 {
     public static byte[] Load(string name)
     {
-        string dir = Environment.GetEnvironmentVariable("YOMIEL_STORIES");
-        if (string.IsNullOrEmpty(dir))
+        var dirs = new List<string>();
+        string env = Environment.GetEnvironmentVariable("YOMIEL_STORIES");
+        if (!string.IsNullOrEmpty(env))
+            dirs.Add(env);
+        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
+            dirs.Add(Path.Combine(d.FullName, "stories"));
+
+        foreach (string dir in dirs)
         {
-            for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
-            {
-                if (Directory.Exists(Path.Combine(d.FullName, "stories")))
-                {
-                    dir = Path.Combine(d.FullName, "stories");
-                    break;
-                }
-            }
+            string path = Path.Combine(dir, name);
+            if (File.Exists(path))
+                return File.ReadAllBytes(path);
         }
-        string path = dir == null ? null : Path.Combine(dir, name);
-        if (path == null || !File.Exists(path))
-            Assert.Skip($"{name} not found; put it in a stories folder or set YOMIEL_STORIES");
-        return File.ReadAllBytes(path);
+        Assert.Skip($"{name} not found; put it in a stories folder or set YOMIEL_STORIES");
+        return null;
     }
 }
 

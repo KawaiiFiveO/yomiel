@@ -168,5 +168,60 @@ public class ScreenTests
         Assert.False(new ZScreen(99, 30).LoadContents(screen.SaveContents()));
     }
 
+    [Fact]
+    public void ResizingWrapsAgain()
+    {
+        var screen = new ZScreen(10, 6);
+        screen.Write("one two three four\nfive abcdefghijkl");
+        string[] narrow = { "one two", "three four", "five", "abcdefghij", "kl", "" };
+        Assert.Equal(narrow, Rows(screen));
+        screen.Resize(20, 6);
+        Assert.Equal(new[] { "one two three four", "five abcdefghijkl", "", "", "", "" }, Rows(screen));
+        Assert.Equal(1, screen.LowerLineCount);
+        screen.Resize(10, 6);
+        Assert.Equal(narrow, Rows(screen));
+        screen.Write("m");
+        Assert.Equal("klm", Rows(screen)[4]);
+    }
+
+    [Fact]
+    public void ResizingKeepsTheUpperWindowCorner()
+    {
+        var screen = new ZScreen(10, 4);
+        screen.Apply(Item(ZOutputKind.SplitWindow, 2));
+        screen.Apply(Item(ZOutputKind.SetWindow, 1));
+        screen.Write("status bar\nsecond");
+        screen.Resize(6, 3);
+        Assert.Equal(new[] { "status", "second", "" }, Rows(screen));
+        screen.Resize(12, 1);
+        Assert.Equal(1, screen.UpperHeight);
+        Assert.Equal(new[] { "status" }, Rows(screen));
+    }
+
+    [Fact]
+    public void ResizingKeepsTheClearedTop()
+    {
+        var screen = new ZScreen(10, 4);
+        screen.Write("a\nb\nc\nd\ne");
+        screen.Apply(Item(ZOutputKind.EraseWindow, 0));
+        screen.Write("top line here");
+        screen.Resize(20, 5);
+        Assert.Equal(new[] { "top line here", "", "", "", "" }, Rows(screen));
+    }
+
+    [Fact]
+    public void ContentsLoadAtTheirOwnSizeAndResize()
+    {
+        var screen = new ZScreen(10, 4);
+        screen.Write("one two three four\n>");
+        ZScreen copy = ZScreen.FromContents(screen.SaveContents());
+        Assert.NotNull(copy);
+        Assert.Equal(10, copy.Columns);
+        Assert.Equal(Rows(screen), Rows(copy));
+        copy.Resize(20, 3);
+        Assert.Equal(new[] { "one two three four", ">", "" }, Rows(copy));
+        Assert.Null(ZScreen.FromContents(new byte[] { 9, 0, 0, 0 }));
+    }
+
     private static ZOutput Item(ZOutputKind kind, int value) => new(kind, 0) { Value = value };
 }

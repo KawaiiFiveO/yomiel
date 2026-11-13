@@ -47,7 +47,7 @@ public sealed partial class ZMachine
         if (storyFile.Length < 64)
             throw new ArgumentException("the file is too short to be a story file");
         Version = storyFile[0];
-        if (Version != 5 && Version != 7 && Version != 8)
+        if (!IsSupportedVersion(Version))
             throw new ArgumentException($"version {Version} story files aren't supported (5, 7 and 8 are)");
 
         this.options = (options ?? new ZMachineOptions()).Clone();
@@ -70,6 +70,9 @@ public sealed partial class ZMachine
 
     /// <summary>The story file's version: 5, 7 or 8.</summary>
     public int Version { get; }
+
+    /// <summary>Whether a story file of this version (its first byte) can be loaded.</summary>
+    public static bool IsSupportedVersion(int version) => version == 5 || version == 7 || version == 8;
 
     /// <summary>The release number from the header.</summary>
     public int Release => story[2] << 8 | story[3];

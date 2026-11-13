@@ -1,0 +1,85 @@
+# Tests, then builds self-contained yomiel-tui for Windows and Linux on a version tag (v0.1.0)
+# and attaches them to a draft GitHub release. Run by hand to build them as workflow artifacts only.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+          - rid: linux-x64
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else echo "version=0.0.0-dev.${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"; fi
+
+      # Uses the redistributable stories in Yomiel.Tests/stories; tests for other stories are skipped.
+      - name: Test
+        run: dotnet test Yomiel.Tests -c Release -f net10.0
+
+      - name: Publish
+        run: dotnet publish Yomiel.Tui -c Release -r ${{ matrix.rid }} -p:Version=${{ steps.version.outputs.version }} -o publish
+
+      - name: Archive
+        id: archive
+        run: |
+          name="yomiel-${{ steps.version.outputs.version }}-${{ matrix.rid }}"
+          mkdir "$name"
+          cp README.md LICENSE.txt "$name/"
+          # Releases never contain story files.
+          if find "$name" publish -iname '*.z[1-8]' -o -iname '*.zblorb' -o -iname '*.zlb' | grep .; then
+            echo "Story files found in the release"; exit 1
+          fi
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            cp publish/yomiel-tui.exe "$name/"
+            7z a -bd "$name.zip" "$name" > /dev/null
+            echo "file=$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            cp publish/yomiel-tui "$name/"
+            chmod +x "$name/yomiel-tui"
+            tar -czf "$name.tar.gz" "$name"
+            echo "file=$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: ${{ steps.archive.outputs.file }}
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "Yomiel ${GITHUB_REF_NAME#v}"
